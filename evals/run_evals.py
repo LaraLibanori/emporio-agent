@@ -77,8 +77,11 @@ def main() -> int:
     ap.add_argument("--examples", action="store_true")
     args = ap.parse_args()
 
-    from emporio.config import Settings
+    from emporio.config import Settings, missing_key_message
 
+    if msg := missing_key_message(Settings()):
+        print(f"⚠ {msg}")
+        return 2
     model = f"{Settings().provider}:{Settings().model}"
     state = ROOT / "var" / "evals"
     state.mkdir(parents=True, exist_ok=True)

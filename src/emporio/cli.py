@@ -18,6 +18,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from .agent import Agent
+from .config import Settings, missing_key_message
 
 console = Console()
 
@@ -29,6 +30,9 @@ def main() -> None:
     args = ap.parse_args()
     logging.basicConfig(level=logging.WARNING)
 
+    if msg := missing_key_message(Settings()):
+        console.print(f"[bold red]⚠ {msg}[/]")
+        raise SystemExit(1)
     session = args.session or f"cli-{uuid.uuid4().hex[:8]}"
     debug = args.debug
     agent = Agent()

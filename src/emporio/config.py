@@ -47,3 +47,15 @@ def now() -> datetime:
             dt = dt.replace(hour=10)  # só a data -> assume meio da manhã
         return dt.replace(tzinfo=STORE_TZ) if dt.tzinfo is None else dt.astimezone(STORE_TZ)
     return datetime.now(STORE_TZ)
+
+
+def missing_key_message(settings: "Settings") -> str | None:
+    """Mensagem amigável quando falta configurar o provedor (Ollama local não precisa de chave)."""
+    local = settings.base_url and ("localhost" in settings.base_url or "127.0.0.1" in settings.base_url)
+    if settings.api_key or local:
+        return None
+    return (
+        "LLM_API_KEY não configurada. Copie .env.example para .env e preencha a chave "
+        "(ex.: chave gratuita do Gemini em https://aistudio.google.com/apikey), "
+        "ou aponte LLM_BASE_URL para um Ollama local."
+    )
