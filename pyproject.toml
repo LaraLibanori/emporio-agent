@@ -1,0 +1,33 @@
+[project]
+name = "emporio-agent"
+version = "0.1.0"
+description = "Agente de atendimento da Empório da Música (desafio técnico AI Engineer - Artefact)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "openai>=1.40",
+    "pandas>=2.0",
+    "pypdf>=4.0",
+    "rapidfuzz>=3.0",
+    "rich>=13.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+anthropic = ["anthropic>=0.40"]
+api = ["fastapi>=0.110", "uvicorn>=0.29"]
+dev = ["pytest>=8.0", "httpx>=0.27"]
+
+[project.scripts]
+emporio = "emporio.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
