@@ -161,3 +161,72 @@ def test_describe_error_mostra_mensagem_do_provedor():
         body = {"error": {"status": "INVALID_ARGUMENT", "message": "API key not valid."}}
 
     assert "API key not valid" in describe_error(E())
+
+
+# ---------------- adaptador nativo do Gemini (HTTP simulado) ----------------
+
+def _gemini(handler):
+    import httpx
+
+    from emporio.llm import GeminiLLM
+
+    s = Settings(provider="gemini", model="gemini-2.5-flash", api_key="AQ.teste",
+                 base_url="https://generativelanguage.googleapis.com/v1beta/openai/")
+    return GeminiLLM(s, client=httpx.Client(transport=httpx.MockTransport(handler)))
+
+
+def test_gemini_function_call_e_thought_signature(tmp_path, ctx):
+    import httpx
+
+    sent = []
+
+    def handler(req):
+        body = json.loads(req.content)
+        sent.append(body)
+        assert req.url.path == "/v1beta/models/gemini-2.5-flash:generateContent"  # ignora /openai do .env antigo
+        assert req.headers["x-goog-api-key"] == "AQ.teste"
+        decls = {d["name"]: d for d in body["tools"][0]["functionDeclarations"]}
+        assert "parameters" not in decls["status_loja_agora"]
+        if len(sent) == 1:
+            return httpx.Response(200, json={"candidates": [{"content": {"role": "model", "parts": [
+                {"functionCall": {"name": "detalhes_produto", "args": {"produto": "Takamine GD20"}},
+                 "thoughtSignature": "SIG123"}]}}], "usageMetadata": {"promptTokenCount": 10}})
+        model_turn, tool_turn = body["contents"][-2], body["contents"][-1]
+        assert model_turn["parts"][0]["thoughtSignature"] == "SIG123"
+        assert tool_turn["parts"][0]["functionResponse"]["name"] == "detalhes_produto"
+        preco = tool_turn["parts"][0]["functionResponse"]["response"]["produto"]["preco"]
+        return httpx.Response(200, json={"candidates": [{"content": {"role": "model", "parts": [
+            {"text": f"Sai por {preco}!"}]}}]})
+
+    agent = Agent(llm=_gemini(handler), settings=Settings(state_dir=tmp_path),
+                  store=ConversationStore(tmp_path / "c.db"), tool_context_factory=lambda sid: ctx)
+    r = agent.reply("s", "Quanto custa o Takamine GD20?")
+    assert r.text == "Sai por R$ 2.199,00!"
+    assert sent[0]["toolConfig"]["functionCallingConfig"]["mode"] == "AUTO"
+    # segundo turno reaproveita histórico persistido (com a assinatura) sem erro
+    agent.reply("s", "obrigado")
+    assert any("SIG123" in json.dumps(c) for c in sent[-1]["contents"])
+
+
+def test_gemini_erro_legivel():
+    import httpx
+
+    from emporio.llm import describe_error
+
+    llm = _gemini(lambda req: httpx.Response(404, json={"error": {"code": 404, "status": "NOT_FOUND",
+                                                                  "message": "models/x is not found"}}))
+    try:
+        llm.chat("s", [{"role": "user", "content": "oi"}], [])
+        raise AssertionError("deveria falhar")
+    except Exception as e:
+        assert "NOT_FOUND" in describe_error(e) and "not found" in describe_error(e)
+
+
+def test_build_llm_usa_gemini_nativo_para_url_do_google():
+    from emporio.llm import GeminiLLM, OpenAICompatibleLLM, build_llm
+
+    g = Settings(provider="openai", model="m", api_key="k",
+                 base_url="https://generativelanguage.googleapis.com/v1beta/openai/")
+    assert isinstance(build_llm(g), GeminiLLM)
+    assert isinstance(build_llm(Settings(provider="gemini", model="m", api_key="k")), GeminiLLM)
+    assert isinstance(build_llm(Settings(provider="openai", model="m", api_key="k", base_url=None)), OpenAICompatibleLLM)

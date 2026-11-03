@@ -53,7 +53,7 @@ cp .env.example .env
 
 | Provedor | `LLM_PROVIDER` | `LLM_BASE_URL` | `LLM_MODEL` (sugestão) |
 |---|---|---|---|
-| Google Gemini (grátis) — **padrão** | `openai` | `https://generativelanguage.googleapis.com/v1beta/openai/` | `gemini-2.5-flash` |
+| Google Gemini (grátis) — **padrão**, API nativa | `gemini` | *(vazio)* | `gemini-2.5-flash` |
 | OpenAI | `openai` | *(vazio)* | `gpt-4o-mini` |
 | Groq (grátis) | `openai` | `https://api.groq.com/openai/v1` | `llama-3.3-70b-versatile` |
 | Ollama (local) | `openai` | `http://localhost:11434/v1` | `qwen2.5:7b-instruct` |
@@ -176,9 +176,14 @@ agentes, aprovação humana no meio do fluxo ou checkpoints de estado.
 ### 3.4 Modelo e provedor
 - **Padrão: Gemini 2.5 Flash.** Tem bom *function calling*, latência baixa, custo baixo
   e **tier gratuito**, então qualquer avaliador consegue rodar sem cartão de crédito.
-- O adaptador usa o **formato OpenAI de chat completions**, que é o padrão de fato. Um único
-  adaptador cobre OpenAI, Gemini, Groq, OpenRouter e **Ollama (local, sem dados saindo da
-  máquina)**. A Anthropic tem adaptador próprio. A troca de provedor é só configuração.
+- O formato interno de mensagens é o **chat completions da OpenAI**, que é o padrão de fato. Um
+  adaptador cobre OpenAI, Groq, OpenRouter e **Ollama (local, sem dados saindo da máquina)**.
+- O **Gemini usa a API nativa** (`generateContent` via HTTP, sem SDK extra). Isso aconteceu
+  na prática: a chave do Google usada no desenvolvimento era aceita pela API nativa, mas
+  recebia 404 no endpoint compatível com OpenAI. A API nativa também devolve a
+  `thoughtSignature` dos *function calls*, que o adaptador preserva no histórico (exigida pelos
+  modelos Gemini com raciocínio). A Anthropic tem adaptador próprio. A troca de provedor é só
+  configuração.
 - `temperature=0.2`: atendimento pede consistência, não criatividade.
 
 ### 3.5 Estratégia de prompt (`prompts.py`)
