@@ -74,9 +74,20 @@ def payment_label(code: str) -> str:
     return code
 
 
+# Modelos icônicos que denunciam a marca mesmo quando ela não é citada.
+MODEL_TO_BRAND = {
+    "precision": "fender", "jazz bass": "fender", "stratocaster": "fender",
+    "telecaster": "fender", "stingray": "music man", "les paul": "gibson",
+    "stage custom": "yamaha", "export": "pearl", "star-mount": "tama",
+    "supernatural": "roland",
+}
+
+
 def _brands_in(text: str) -> set[str]:
     t = normalize(text)
-    return {b for b in KNOWN_BRANDS if re.search(rf"\b{re.escape(b)}\b", t)}
+    found = {b for b in KNOWN_BRANDS if re.search(rf"\b{re.escape(b)}\b", t)}
+    found |= {brand for model, brand in MODEL_TO_BRAND.items() if re.search(rf"\b{re.escape(model)}\b", t)}
+    return found
 
 
 def description_is_reliable(name: str, description: str) -> bool:
