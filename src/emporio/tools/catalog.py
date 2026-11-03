@@ -188,6 +188,13 @@ def buscar_produtos(
     ordenar: str = "menor_preco",
     limite: int = 8,
 ) -> dict:
+    from .commerce import to_number  # import tardio: commerce importa catalog
+
+    try:
+        preco_min, preco_max = to_number(preco_min, "preco_min"), to_number(preco_max, "preco_max")
+        limite = int(to_number(limite, "limite") or 8)
+    except ValueError as e:
+        return {"erro": str(e)}
     p = ctx.store.products
     df = p.copy()
     notes: list[str] = []
@@ -263,7 +270,7 @@ def buscar_produtos(
     else:
         df = df.sort_values("final_price")
 
-    limite = max(1, min(int(limite or 8), 15))
+    limite = max(1, min(limite, 15))
     out = {
         "total_encontrado": int(len(df)),
         "mostrando": int(min(len(df), limite)),

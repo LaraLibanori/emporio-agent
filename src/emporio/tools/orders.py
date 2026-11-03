@@ -8,7 +8,9 @@ informação a quem tenta adivinhar números de pedido.
 
 from __future__ import annotations
 
-from datetime import date
+import sqlite3
+from datetime import date, datetime, timedelta
+from pathlib import Path
 
 import pandas as pd
 
@@ -23,12 +25,50 @@ VERIFY_PARAMS = {
     },
 }
 
-MAX_FAILED_ATTEMPTS = 3
-_failed_attempts: dict[str, int] = {}
+MAX_FAILS_PER_SESSION = 3   # tentativas erradas por conversa
+MAX_FAILS_PER_ORDER = 5     # tentativas erradas por nº de pedido (de qualquer sessão)
+FAIL_WINDOW = timedelta(hours=1)
+
+
+class _FailureLog:
+    """Falhas de verificação persistidas em SQLite (sobrevivem a reinício e não zeram
+    com um acerto). Limite por sessão E por nº de pedido: trocar de session_id não
+    permite continuar chutando o mesmo pedido."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        with sqlite3.connect(path) as c:
+            c.execute("CREATE TABLE IF NOT EXISTS failures (session_id TEXT, order_id INTEGER, ts TEXT)")
+
+    def record(self, session_id: str, order_id: int | None, when: datetime) -> None:
+        with sqlite3.connect(self.path) as c:
+            c.execute("INSERT INTO failures VALUES (?,?,?)", (session_id, order_id, when.isoformat()))
+
+    def blocked(self, session_id: str, order_id: int | None, when: datetime) -> bool:
+        since = (when - FAIL_WINDOW).isoformat()
+        with sqlite3.connect(self.path) as c:
+            by_session = c.execute(
+                "SELECT COUNT(*) FROM failures WHERE session_id=? AND ts>=?", (session_id, since)
+            ).fetchone()[0]
+            by_order = c.execute(
+                "SELECT COUNT(*) FROM failures WHERE order_id=? AND ts>=?", (order_id, since)
+            ).fetchone()[0] if order_id is not None else 0
+        return by_session >= MAX_FAILS_PER_SESSION or by_order >= MAX_FAILS_PER_ORDER
+
+
+def _parse_order_id(raw) -> int | None:
+    try:
+        f = float(str(raw).strip().lstrip("#").replace(",", "."))
+    except ValueError:
+        return None
+    return int(f) if f.is_integer() and f > 0 else None
 
 
 def _verify(ctx: ToolContext, numero_pedido, email_ou_telefone) -> tuple[pd.Series | None, dict | None]:
-    if _failed_attempts.get(ctx.session_id, 0) >= MAX_FAILED_ATTEMPTS:
+    log = _FailureLog(ctx.state_dir / "security.db")
+    when = ctx.clock()
+    oid = _parse_order_id(numero_pedido)
+    if log.blocked(ctx.session_id, oid, when):
         return None, {
             "verificado": False,
             "bloqueado": True,
@@ -40,13 +80,11 @@ def _verify(ctx: ToolContext, numero_pedido, email_ou_telefone) -> tuple[pd.Seri
         "mensagem": "Não foi possível localizar um pedido com esse número para esse e-mail/telefone. "
         "Peça ao cliente para conferir os dados (sem confirmar se o pedido existe).",
     }
-    try:
-        oid = int(str(numero_pedido).strip().lstrip("#"))
-    except ValueError:
-        return None, {"verificado": False, "mensagem": "Número de pedido inválido."}
+    if oid is None:
+        return None, {"verificado": False, "mensagem": "Número de pedido inválido; peça ao cliente para conferir."}
     orders, customers = ctx.store.orders, ctx.store.customers
     if oid not in orders.index or not email_ou_telefone:
-        _failed_attempts[ctx.session_id] = _failed_attempts.get(ctx.session_id, 0) + 1
+        log.record(ctx.session_id, oid, when)
         return None, fail
     order = orders.loc[oid]
     cust = customers.loc[order["customer_id"]]
@@ -56,9 +94,8 @@ def _verify(ctx: ToolContext, numero_pedido, email_ou_telefone) -> tuple[pd.Seri
     if not ok and len(d) >= 8:
         ok = cust["phone_digits"].endswith(d[-9:]) or d.endswith(cust["phone_digits"])
     if not ok:
-        _failed_attempts[ctx.session_id] = _failed_attempts.get(ctx.session_id, 0) + 1
+        log.record(ctx.session_id, oid, when)
         return None, fail
-    _failed_attempts.pop(ctx.session_id, None)
     return order, None
 
 

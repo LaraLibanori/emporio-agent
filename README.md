@@ -43,7 +43,7 @@ Mel  › O *Takamine GD20 Dreadnought Natural* está disponível por *R$ 2.199,0
 git clone https://github.com/LaraLibanori/emporio-agent.git
 cd emporio-agent
 python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install -e ".[dev,api]"                            # + ".[anthropic]" se for usar Claude
+pip install -e ".[dev,api]"                            # + ",anthropic" nos extras se for usar Claude
 
 cp .env.example .env
 # edite .env: LLM_API_KEY (e, se quiser, LLM_MODEL / LLM_BASE_URL)
@@ -75,7 +75,7 @@ curl -X POST localhost:8000/chat -H 'content-type: application/json' \
 ### Testes e evals
 
 ```bash
-pytest                                   # 34 testes, sem rede e sem LLM (~2s)
+pytest                                   # 41 testes, sem rede e sem LLM (~2s)
 python evals/run_evals.py                # 10 cenários contra o LLM real -> evals/report.md
 python evals/run_evals.py --examples     # também (re)gera as conversas em examples/
 ```
@@ -210,7 +210,9 @@ resultado de ferramenta órfão (alguns provedores rejeitam isso). Chamados fica
 - Uma ferramenta nunca derruba a conversa: argumentos inválidos ou exceções viram `{"erro": ...}` para o modelo se recuperar.
 - Se o provedor cair (ou bater rate limit), o cliente recebe uma mensagem amigável com o telefone da loja.
 - O loop tem limite de rodadas de ferramenta (evita loops e custo descontrolado).
-- Verificação de pedido sem oráculo: "pedido não existe" e "e-mail errado" dão a mesma resposta. Depois de 3 falhas, a sessão é bloqueada e o cliente é encaminhado para a equipe.
+- Verificação de pedido sem oráculo: "pedido não existe" e "e-mail errado" dão a mesma resposta. As falhas ficam em SQLite e têm dois limites numa janela de 1h: **3 por conversa e 5 por nº de pedido**. Assim, trocar de sessão não libera mais chutes, e um acerto não zera o contador. Ao atingir o limite, o cliente é encaminhado para a equipe.
+- Resposta vazia do modelo nunca é gravada no histórico. Na última rodada permitida, o modelo é forçado a responder em texto (`tool_choice=none`), então nenhuma ferramenta executa sem que o cliente veja o resultado.
+- As ferramentas aceitam números "humanos" (`"1.000,00"`, `8.0`, `"#8"`) e devolvem erros que o modelo consegue corrigir.
 
 ---
 
@@ -235,7 +237,7 @@ principais pontos:
 
 ## 5. Qualidade: testes e evals
 
-**Testes unitários (`pytest`, 34 testes, sem rede):**
+**Testes unitários (`pytest`, 41 testes, sem rede):**
 - *Ferramentas:* filtros e ordenação, preço promocional, acessório vs "7 cordas", fuzzy e ambiguidade, alternativas, PIX × promoção, parcelas por faixa, frete, verificação de identidade (formatos de telefone, não vazamento, bloqueio), devolução dentro e fora do prazo, garantia, feriados (incluindo Sexta-feira Santa), RAG por seção.
 - *Agente (com `ScriptedLLM`):* execução de ferramentas, persistência e isolamento de sessões, ferramenta inexistente, queda do provedor, limite de rodadas, janela de histórico, conversão para o formato Anthropic.
 
@@ -282,7 +284,9 @@ Seguindo a orientação do enunciado, assumi o seguinte e documentei cada ponto:
 
 **Limitações**
 - **O handoff humano é um arquivo** (`chamados.jsonl`). Não há integração real com helpdesk ou CRM.
-- **A verificação de identidade é simples** (nº do pedido + e-mail/telefone). O contador de tentativas vive em memória do processo. Em produção usaria OTP via WhatsApp e rate limit no Redis.
+- **A verificação de identidade é simples** (nº do pedido + e-mail/telefone, com limite de tentativas). Em produção usaria OTP via WhatsApp.
+- **O `session_id` da API é confiável por design.** O histórico de uma sessão pode conter dados de pedido já verificados, então em produção o id precisa vir de um canal autenticado (o número remetente informado pelo webhook do WhatsApp), nunca do cliente. A API também não tem autenticação própria.
+- **A instalação suportada é a editável** (`pip install -e .`): os CSVs e o PDF são lidos de `data/` no repositório (ou de `AGENT_DATA_DIR`).
 - **Frete fora de Campo Grande** não é cotado (exige CEP, peso e dimensões que o dataset não tem).
 - **O dataset é estático** (CSVs carregados uma vez). Mudanças de estoque exigem reiniciar.
 - **Não há reserva de produto nem fechamento de venda**: o agente informa e encaminha.

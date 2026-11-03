@@ -83,7 +83,12 @@ reservar produtos.
 # Contato da loja (fixo)
 Endereço: Rua 14 de Maio, 3200 — Centro, Campo Grande/MS, CEP 79202-333. \
 Telefone/WhatsApp: (67) 3341-4444. E-mail: contato@emporiodamusica.com.br. \
-Horário: seg–sex 09h–18h, sáb 09h–13h, domingos e feriados fechado.
+Horário: seg–sex 09h–18h, sáb 09h–13h, domingos e feriados fechado. \
+Estes contatos prevalecem sobre qualquer outro número que apareça nos trechos do manual.
+
+# Fora do expediente
+Se a dúvida exigir a equipe humana e a loja estiver fechada (confira com `status_loja_agora`), \
+avise com naturalidade quando a equipe retorna.
 """
 
 

@@ -68,19 +68,22 @@ class Agent:
         usage = {"input": 0, "output": 0}
 
         text = None
-        for _ in range(self.settings.max_tool_rounds + 1):
+        specs = [t.spec() for t in self.tools]
+        for round_ in range(self.settings.max_tool_rounds + 1):
+            # última rodada: força o modelo a responder em texto com o que já tem
+            last_round = round_ == self.settings.max_tool_rounds
             try:
-                resp = self.llm.chat(system, past + new_msgs, [t.spec() for t in self.tools])
+                resp = self.llm.chat(system, past + new_msgs, specs, force_text=last_round)
             except Exception as e:  # provedor fora, rate limit, etc.
                 log.exception("falha no LLM: %s", e)
                 text = FALLBACK_REPLY
                 break
             for k, v in resp.usage.items():
                 usage[k] = usage.get(k, 0) + v
-            new_msgs.append(resp.as_message())
-            if not resp.tool_calls:
+            if not resp.tool_calls or last_round:
                 text = (resp.content or "").strip()
-                break
+                break  # a mensagem final é gravada abaixo (nunca gravamos assistant vazio)
+            new_msgs.append(resp.as_message())
             for tc in resp.tool_calls:
                 t0 = time.perf_counter()
                 tool = REGISTRY.get(tc.name)
@@ -97,9 +100,7 @@ class Agent:
                 "Deixa eu confirmar isso com a equipe e já te retorno, tudo bem? "
                 "Se preferir, fale com a gente no (67) 3341-4444."
             )
-        last = new_msgs[-1]
-        if not (last["role"] == "assistant" and not last.get("tool_calls") and last.get("content")):
-            new_msgs.append({"role": "assistant", "content": text})
+        new_msgs.append({"role": "assistant", "content": text})
 
         self.history.append(session_id, new_msgs)
         return AgentReply(text, trace, usage)

@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from fastapi import FastAPI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .agent import Agent
 
@@ -24,9 +24,20 @@ def get_agent() -> Agent:
 
 
 class ChatIn(BaseModel):
-    session_id: str = Field(..., description="Identificador da conversa (ex.: telefone do cliente)")
+    # IMPORTANTE: em produção o session_id deve vir de um canal autenticado (ex.: o número
+    # remetente informado pelo webhook do WhatsApp), nunca escolhido livremente pelo cliente:
+    # o histórico da sessão pode conter dados de pedido já verificados.
+    session_id: str = Field(..., min_length=1, max_length=128, pattern=r"^[\w.:+-]+$",
+                            description="Identificador da conversa (ex.: telefone do cliente)")
     message: str = Field(..., min_length=1, max_length=2000)
     debug: bool = False
+
+    @field_validator("message")
+    @classmethod
+    def not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("mensagem vazia")
+        return v.strip()
 
 
 class ChatOut(BaseModel):

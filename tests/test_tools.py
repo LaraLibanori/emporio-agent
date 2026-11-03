@@ -115,7 +115,7 @@ def test_bloqueio_apos_tentativas(ctx):
     for _ in range(3):
         run(ctx, "consultar_pedido", numero_pedido=8, email_ou_telefone="chute@x.com")
     r = run(ctx, "consultar_pedido", numero_pedido=8, email_ou_telefone="anacarol.ferreira@coldmail.com")
-    assert r.get("bloqueado")
+    assert r.get("bloqueado") and "Ana" not in str(r)
 
 
 def test_alerta_de_atraso(ctx):
@@ -190,3 +190,47 @@ def test_ferramenta_robusta_a_argumentos_ruins(ctx):
     assert "erro" in REGISTRY["detalhes_produto"].run(ctx, "{json quebrado")
     r = REGISTRY["detalhes_produto"].run(ctx, {"produto": "Takamine GD20", "inventado": 1})
     assert r["encontrado"] and "_aviso" in r
+
+
+# ---------------- regressões da revisão de código ----------------
+
+def test_frete_campo_grande_em_varios_formatos(ctx):
+    for c in ["Campo Grande/MS", "Campo Grande, MS", "campo grande ms", "Campo Grande - MS", "CAMPO GRANDE"]:
+        assert run(ctx, "estimar_frete", cidade=c, valor_pedido=600)["valor"] == "grátis", c
+    assert "modalidades" in run(ctx, "estimar_frete", cidade="Campo Grande do Sul, PR")
+
+
+def test_numero_de_pedido_como_float_ou_texto(ctx):
+    for n in [8.0, "8", "#8", "8.0"]:
+        assert run(ctx, "consultar_pedido", numero_pedido=n,
+                   email_ou_telefone="anacarol.ferreira@coldmail.com")["verificado"], n
+    assert run(ctx, "consultar_pedido", numero_pedido=8.5, email_ou_telefone="x")["verificado"] is False
+
+
+def test_bloqueio_nao_zera_com_acerto_e_vale_por_pedido(ctx_at):
+    ctx = ctx_at("2026-03-25T10:00", session="atacante")
+    mine = dict(numero_pedido=8, email_ou_telefone="anacarol.ferreira@coldmail.com")
+    run(ctx, "consultar_pedido", numero_pedido=1, email_ou_telefone="chute1@x.com")
+    run(ctx, "consultar_pedido", numero_pedido=1, email_ou_telefone="chute2@x.com")
+    assert run(ctx, "consultar_pedido", **mine)["verificado"]       # acerto não zera
+    run(ctx, "consultar_pedido", numero_pedido=1, email_ou_telefone="chute3@x.com")
+    assert run(ctx, "consultar_pedido", **mine).get("bloqueado")
+    # trocar de sessão não libera chutes no mesmo pedido (limite por pedido = 5)
+    for i in range(5):
+        run(ctx_at("2026-03-25T10:00", session=f"s{i}"), "consultar_pedido",
+            numero_pedido=3, email_ou_telefone=f"c{i}@x.com")
+    r = run(ctx_at("2026-03-25T10:00", session="nova"), "consultar_pedido",
+            numero_pedido=3, email_ou_telefone="isabela.moreira@jmail.com")
+    assert r.get("bloqueado")
+    # janela de 1h expira
+    later = ctx_at("2026-03-25T11:30", session="atacante")
+    assert run(later, "consultar_pedido", **mine)["verificado"]
+
+
+def test_entradas_numericas_em_texto(ctx):
+    r = run(ctx, "buscar_produtos", categoria="violão", preco_max="1.000,00")
+    assert r["total_encontrado"] == 12
+    assert "erro" in run(ctx, "buscar_produtos", preco_max="mil")
+    assert "erro" in run(ctx, "calcular_pagamento", valor=float("nan"))
+    assert "erro" in run(ctx, "calcular_pagamento", valor=100, quantidade=-2)
+    assert run(ctx, "estimar_frete", cidade="Campo Grande", produto="Kalani KAL-700T", quantidade=2)["valor"] == "grátis"

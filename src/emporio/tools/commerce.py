@@ -7,6 +7,8 @@ modelo apenas comunica o resultado.
 
 from __future__ import annotations
 
+import re
+
 from ..data import normalize
 from .base import ToolContext, brl, tool
 from .catalog import detalhes_produto
@@ -23,6 +25,31 @@ METRO_CAMPO_GRANDE = {"campo grande"}  # manual não lista municípios da regiã
 FREE_SHIPPING_MIN = 500.0
 METRO_FEE = 35.0
 OVERSIZED_CATEGORIES = {"Baterias e Percussão", "Teclados e Pianos", "Cordas Orquestrais"}
+
+
+def to_number(value, field: str) -> float | None:
+    """Aceita 1000, "1000", "1.000,00", "R$ 1.000". Lança ValueError com mensagem útil."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        f = float(value)
+    else:
+        t = str(value).replace("R$", "").strip()
+        if "," in t:
+            t = t.replace(".", "").replace(",", ".")
+        try:
+            f = float(t)
+        except ValueError:
+            raise ValueError(f"'{field}' deve ser um número em reais (recebido: {value!r})") from None
+    if f != f or f in (float("inf"), float("-inf")):
+        raise ValueError(f"'{field}' inválido")
+    return f
+
+
+def is_campo_grande(cidade: str) -> bool:
+    c = re.split(r"[-/,(]", normalize(cidade))[0].strip()
+    c = re.sub(r"\s+ms$", "", c).strip()
+    return c in METRO_CAMPO_GRANDE
 
 
 def installment_table(total: float) -> list[dict]:
@@ -61,7 +88,13 @@ def calcular_pagamento(
     valor: float | None = None,
     valor_ja_promocional: bool = False,
 ) -> dict:
-    qty = max(1, int(quantidade or 1))
+    try:
+        valor = to_number(valor, "valor")
+        qty = int(to_number(quantidade, "quantidade") or 1)
+    except ValueError as e:
+        return {"erro": str(e)}
+    if qty < 1:
+        return {"erro": "quantidade deve ser pelo menos 1"}
     info: dict = {}
     if produto:
         found = detalhes_produto(ctx, produto)
@@ -102,6 +135,8 @@ def calcular_pagamento(
             "max_parcelas_sem_juros": table[-1]["parcelas"] if table else 1,
             "opcoes": table if table else [{"parcelas": 1, "valor_parcela": brl(total)}],
             "regra": "sem juros; parcela mínima R$50 (1–3x), R$80 (4–6x), R$100 (7–12x)",
+            "nota": "o manual é ambíguo sobre o mínimo em até 3x; adotamos R$50. Em caso de dúvida "
+            "do cliente, a equipe confirma",
         },
         "pagamento_combinado": "permitido (ex.: PIX + cartão)" if total > COMBINED_PAYMENT_MIN
         else f"não disponível (só para compras acima de {brl(COMBINED_PAYMENT_MIN)})",
@@ -123,20 +158,28 @@ Outras cidades: Correios/Jadlog com valor calculado pelo CEP (a equipe cota)."""
             "cidade": {"type": "string", "description": "Cidade de entrega"},
             "valor_pedido": {"type": "number", "description": "Valor dos produtos em reais (opcional)"},
             "produto": {"type": "string", "description": "Produto (opcional, para checar se é de grande porte)"},
+            "quantidade": {"type": "integer", "description": "Quantidade do produto (padrão 1)"},
         },
         "required": ["cidade"],
     },
 )
-def estimar_frete(ctx: ToolContext, cidade: str, valor_pedido: float | None = None, produto: str | None = None) -> dict:
+def estimar_frete(
+    ctx: ToolContext, cidade: str, valor_pedido: float | None = None, produto: str | None = None, quantidade: int = 1
+) -> dict:
+    try:
+        valor_pedido = to_number(valor_pedido, "valor_pedido")
+        qty = max(1, int(to_number(quantidade, "quantidade") or 1))
+    except ValueError as e:
+        return {"erro": str(e)}
     out: dict = {"cidade": cidade}
     if produto:
         found = detalhes_produto(ctx, produto)
         if found.get("encontrado"):
             row = ctx.store.products.loc[found["produto"]["id"]]
-            valor_pedido = valor_pedido or float(row["final_price"])
+            valor_pedido = valor_pedido or float(row["final_price"]) * qty
             if row["category"] in OVERSIZED_CATEGORIES:
                 out["grande_porte"] = "instrumento de grande porte: pode exigir frete especial com cotação individual"
-    if normalize(cidade).split("-")[0].strip() in METRO_CAMPO_GRANDE:
+    if is_campo_grande(cidade):
         out["modalidade"] = "motoboy próprio (cliente é contatado por telefone antes da entrega)"
         out["prazo"] = "1 a 3 dias úteis"
         if valor_pedido is None:

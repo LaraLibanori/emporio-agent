@@ -111,3 +111,34 @@ def test_conversao_para_anthropic_agrupa_tool_results():
     out = AnthropicLLM._convert(msgs)
     assert [m["role"] for m in out] == ["user", "assistant", "user"]
     assert len(out[2]["content"]) == 2 and out[1]["content"][1]["input"] == {"x": 1}
+
+
+def test_resposta_vazia_nao_corrompe_historico(tmp_path, ctx):
+    agent, _ = make_agent(tmp_path, ctx, lambda s, m: LLMResponse(None))
+    r = agent.reply("s", "oi")
+    hist = agent.history.load("s")
+    assert r.text and hist[-1]["content"] == r.text
+    assert all(m.get("content") or m.get("tool_calls") for m in hist if m["role"] == "assistant")
+
+
+def test_ultima_rodada_forca_texto_e_nao_executa_ferramenta(tmp_path, ctx):
+    def fn(s, m):
+        return LLMResponse("parcial", [ToolCall("c", "registrar_chamado",
+                                                {"tipo": "outro", "resumo": "x", "contato_cliente": "y"})])
+
+    agent, llm = make_agent(tmp_path, ctx, fn)
+    r = agent.reply("s", "loop")
+    assert llm.force_text_flags[-1] is True and llm.force_text_flags.count(True) == 1
+    assert len(r.trace) == agent.settings.max_tool_rounds  # a última rodada não executou nada
+
+
+def test_api_chat(tmp_path, ctx):
+    from fastapi.testclient import TestClient
+
+    import emporio.api as api
+
+    api._agent, _ = make_agent(tmp_path, ctx, lambda s, m: LLMResponse("Olá!"))
+    c = TestClient(api.app)
+    assert c.post("/chat", json={"session_id": "67999", "message": "oi"}).json()["reply"] == "Olá!"
+    assert c.post("/chat", json={"session_id": "67999", "message": "   "}).status_code == 422
+    assert c.post("/chat", json={"session_id": "", "message": "oi"}).status_code == 422

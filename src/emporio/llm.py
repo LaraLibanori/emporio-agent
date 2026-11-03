@@ -43,7 +43,10 @@ class LLMResponse:
 
 
 class LLM(Protocol):
-    def chat(self, system: str, messages: list[dict], tools: list[dict]) -> LLMResponse: ...
+    def chat(self, system: str, messages: list[dict], tools: list[dict], force_text: bool = False) -> LLMResponse:
+        """force_text=True: ferramentas continuam declaradas (exigido quando o histórico
+        tem tool calls), mas o modelo é obrigado a responder em texto."""
+        ...
 
 
 def _parse_args(raw: str | dict | None) -> dict:
@@ -62,12 +65,17 @@ class OpenAICompatibleLLM:
         self.client = OpenAI(api_key=settings.api_key or "not-needed", base_url=settings.base_url)
         self.model, self.temperature = settings.model, settings.temperature
 
-    def chat(self, system: str, messages: list[dict], tools: list[dict]) -> LLMResponse:
+    def chat(self, system: str, messages: list[dict], tools: list[dict], force_text: bool = False) -> LLMResponse:
+        kwargs = {}
+        if tools:
+            kwargs["tools"] = [{"type": "function", "function": t} for t in tools]
+            if force_text:
+                kwargs["tool_choice"] = "none"
         resp = self.client.chat.completions.create(
             model=self.model,
             temperature=self.temperature,
             messages=[{"role": "system", "content": system}, *messages],
-            tools=[{"type": "function", "function": t} for t in tools] or None,
+            **kwargs,
         )
         msg = resp.choices[0].message
         calls = [
@@ -109,14 +117,21 @@ class AnthropicLLM:
                 out.append({"role": m["role"], "content": m.get("content") or ""})
         return out
 
-    def chat(self, system: str, messages: list[dict], tools: list[dict]) -> LLMResponse:
+    def chat(self, system: str, messages: list[dict], tools: list[dict], force_text: bool = False) -> LLMResponse:
+        kwargs = {}
+        if tools:
+            kwargs["tools"] = [
+                {"name": t["name"], "description": t["description"], "input_schema": t["parameters"]} for t in tools
+            ]
+            if force_text:
+                kwargs["tool_choice"] = {"type": "none"}
         resp = self.client.messages.create(
             model=self.model,
             max_tokens=1024,
             temperature=self.temperature,
             system=system,
             messages=self._convert(messages),
-            tools=[{"name": t["name"], "description": t["description"], "input_schema": t["parameters"]} for t in tools],
+            **kwargs,
         )
         text = "".join(b.text for b in resp.content if b.type == "text") or None
         calls = [ToolCall(b.id, b.name, dict(b.input)) for b in resp.content if b.type == "tool_use"]
@@ -129,9 +144,11 @@ class ScriptedLLM:
     def __init__(self, fn: Callable[[str, list[dict]], LLMResponse]):
         self.fn = fn
         self.calls: list[list[dict]] = []
+        self.force_text_flags: list[bool] = []
 
-    def chat(self, system: str, messages: list[dict], tools: list[dict]) -> LLMResponse:
+    def chat(self, system: str, messages: list[dict], tools: list[dict], force_text: bool = False) -> LLMResponse:
         self.calls.append(list(messages))
+        self.force_text_flags.append(force_text)
         return self.fn(system, messages)
 
 

@@ -29,10 +29,7 @@ def run_scenario(sc: Scenario, state_dir: Path):
     os.environ["AGENT_NOW"] = sc.now
     from emporio.agent import Agent
     from emporio.config import Settings
-    from emporio.tools import orders
-
-    orders._failed_attempts.clear()
-    settings = Settings(state_dir=state_dir)
+    settings = Settings(state_dir=state_dir / sc.id / str(int(time.time())))
     agent = Agent(settings=settings)
     session = f"eval-{sc.id}-{int(time.time())}"
     results, transcript = [], []
