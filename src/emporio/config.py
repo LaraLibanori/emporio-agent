@@ -23,7 +23,7 @@ STORE_TZ = ZoneInfo("America/Campo_Grande")
 @dataclass(frozen=True)
 class Settings:
     provider: str = field(default_factory=lambda: os.getenv("LLM_PROVIDER", "openai").lower())
-    model: str = field(default_factory=lambda: os.getenv("LLM_MODEL", "gemini-2.5-flash"))
+    model: str = field(default_factory=lambda: os.getenv("LLM_MODEL", "gemini-3.8-flash"))
     api_key: str | None = field(default_factory=lambda: os.getenv("LLM_API_KEY") or None)
     base_url: str | None = field(default_factory=lambda: os.getenv("LLM_BASE_URL") or None)
     temperature: float = field(default_factory=lambda: float(os.getenv("LLM_TEMPERATURE", "0.2")))

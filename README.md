@@ -53,7 +53,7 @@ cp .env.example .env
 
 | Provedor | `LLM_PROVIDER` | `LLM_BASE_URL` | `LLM_MODEL` (sugestão) |
 |---|---|---|---|
-| Google Gemini (grátis) — **padrão**, API nativa | `gemini` | *(vazio)* | `gemini-2.5-flash` |
+| Google Gemini (grátis) — **padrão**, API nativa | `gemini` | *(vazio)* | `gemini-3.8-flash` |
 | OpenAI | `openai` | *(vazio)* | `gpt-4o-mini` |
 | Groq (grátis) | `openai` | `https://api.groq.com/openai/v1` | `llama-3.3-70b-versatile` |
 | Ollama (local) | `openai` | `http://localhost:11434/v1` | `qwen2.5:7b-instruct` |
@@ -174,8 +174,10 @@ agentes, aprovação humana no meio do fluxo ou checkpoints de estado.
   porque é perguntado o tempo todo e não muda. O resto vem da busca.
 
 ### 3.4 Modelo e provedor
-- **Padrão: Gemini 2.5 Flash.** Tem bom *function calling*, latência baixa, custo baixo
-  e **tier gratuito**, então qualquer avaliador consegue rodar sem cartão de crédito.
+- **Padrão: Gemini 3.8 Flash.** Tem bom *function calling*, latência baixa, custo baixo
+  e **tier gratuito**, então qualquer avaliador consegue rodar sem cartão de crédito. O
+  `gemini-2.5-flash`, planejado originalmente, não está mais disponível para contas novas, e a
+  API respondeu com 404 recomendando a troca.
 - O formato interno de mensagens é o **chat completions da OpenAI**, que é o padrão de fato. Um
   adaptador cobre OpenAI, Groq, OpenRouter e **Ollama (local, sem dados saindo da máquina)**.
 - O **Gemini usa a API nativa** (`generateContent` via HTTP, sem SDK extra). Isso aconteceu
@@ -184,7 +186,7 @@ agentes, aprovação humana no meio do fluxo ou checkpoints de estado.
   `thoughtSignature` dos *function calls*, que o adaptador preserva no histórico (exigida pelos
   modelos Gemini com raciocínio). A Anthropic tem adaptador próprio. A troca de provedor é só
   configuração.
-- `temperature=0.2`: atendimento pede consistência, não criatividade.
+- Temperatura: o Google recomenda **1.0 para o Gemini 3** (valores baixos podem causar repetição). Para os outros provedores sugiro ~0.2, porque atendimento pede consistência. É configurável em `LLM_TEMPERATURE`.
 
 ### 3.5 Estratégia de prompt (`prompts.py`)
 O prompt é organizado em blocos com responsabilidades claras:
