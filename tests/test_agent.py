@@ -142,3 +142,22 @@ def test_api_chat(tmp_path, ctx):
     assert c.post("/chat", json={"session_id": "67999", "message": "oi"}).json()["reply"] == "Olá!"
     assert c.post("/chat", json={"session_id": "67999", "message": "   "}).status_code == 422
     assert c.post("/chat", json={"session_id": "", "message": "oi"}).status_code == 422
+
+
+def test_ferramenta_sem_parametros_compativel_com_gemini():
+    from emporio.llm import _openai_function
+    from emporio.tools import REGISTRY
+
+    f = _openai_function(REGISTRY["status_loja_agora"].spec())
+    assert "parameters" not in f
+    assert "parameters" in _openai_function(REGISTRY["detalhes_produto"].spec())
+
+
+def test_describe_error_mostra_mensagem_do_provedor():
+    from emporio.llm import describe_error
+
+    class E(Exception):
+        status_code = 400
+        body = {"error": {"status": "INVALID_ARGUMENT", "message": "API key not valid."}}
+
+    assert "API key not valid" in describe_error(E())

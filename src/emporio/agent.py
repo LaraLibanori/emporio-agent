@@ -17,7 +17,7 @@ import time
 from dataclasses import dataclass, field
 
 from .config import Settings
-from .llm import LLM, build_llm
+from .llm import LLM, build_llm, describe_error
 from .memory import ConversationStore, window
 from .prompts import SYSTEM_PROMPT, turn_context
 from .tools import REGISTRY, ToolContext
@@ -75,7 +75,8 @@ class Agent:
             try:
                 resp = self.llm.chat(system, past + new_msgs, specs, force_text=last_round)
             except Exception as e:  # provedor fora, rate limit, etc.
-                log.exception("falha no LLM: %s", e)
+                log.error("falha no LLM: %s", describe_error(e))
+                log.debug("detalhes", exc_info=True)
                 text = FALLBACK_REPLY
                 break
             for k, v in resp.usage.items():

@@ -58,6 +58,34 @@ def _parse_args(raw: str | dict | None) -> dict:
         return {"_raw": raw}
 
 
+def _openai_function(spec: dict) -> dict:
+    """Gemini (endpoint compatível) rejeita `parameters` com `properties` vazio (HTTP 400).
+    Para ferramentas sem argumentos, omitimos `parameters` (aceito por OpenAI e Gemini)."""
+    if not spec.get("parameters", {}).get("properties"):
+        return {"name": spec["name"], "description": spec["description"]}
+    return spec
+
+
+def describe_error(e: Exception) -> str:
+    """Extrai a mensagem real do provedor (o SDK às vezes mostra só 'Error code: 400')."""
+    body = getattr(e, "body", None)
+    if body:
+        if isinstance(body, list) and body:
+            body = body[0]
+        if isinstance(body, dict):
+            err = body.get("error", body)
+            if isinstance(err, dict):
+                return f"{getattr(e, 'status_code', '')} {err.get('status', '')} {err.get('message', err)}".strip()
+            return f"{getattr(e, 'status_code', '')} {err}".strip()
+    resp = getattr(e, "response", None)
+    if resp is not None:
+        try:
+            return f"{resp.status_code} {resp.text[:500]}"
+        except Exception:
+            pass
+    return f"{type(e).__name__}: {e}"
+
+
 class OpenAICompatibleLLM:
     def __init__(self, settings: Settings):
         from openai import OpenAI
@@ -68,7 +96,7 @@ class OpenAICompatibleLLM:
     def chat(self, system: str, messages: list[dict], tools: list[dict], force_text: bool = False) -> LLMResponse:
         kwargs = {}
         if tools:
-            kwargs["tools"] = [{"type": "function", "function": t} for t in tools]
+            kwargs["tools"] = [{"type": "function", "function": _openai_function(t)} for t in tools]
             if force_text:
                 kwargs["tool_choice"] = "none"
         resp = self.client.chat.completions.create(

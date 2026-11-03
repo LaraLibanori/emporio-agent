@@ -71,6 +71,19 @@ def write_example(sc: Scenario, transcript, model: str) -> None:
     (ROOT / "examples" / f"{sc.id}.md").write_text("\n".join(lines), encoding="utf-8")
 
 
+def preflight() -> str | None:
+    """Uma chamada mínima (com as ferramentas declaradas) antes de rodar tudo."""
+    from emporio.llm import build_llm, describe_error
+    from emporio.tools import REGISTRY
+
+    try:
+        build_llm().chat("Responda apenas: ok", [{"role": "user", "content": "ping"}],
+                         [t.spec() for t in REGISTRY.values()])
+    except Exception as e:
+        return describe_error(e)
+    return None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default=None)
@@ -83,6 +96,10 @@ def main() -> int:
         print(f"⚠ {msg}")
         return 2
     model = f"{Settings().provider}:{Settings().model}"
+    if (err := preflight()) is not None:
+        print(f"⚠ Não foi possível usar o modelo {model}:\n   {err}")
+        print("   Dica: chave inválida costuma aparecer como 400/401/403 'API key not valid'.")
+        return 2
     state = ROOT / "var" / "evals"
     state.mkdir(parents=True, exist_ok=True)
     total = passed = 0
