@@ -230,3 +230,26 @@ def test_build_llm_usa_gemini_nativo_para_url_do_google():
     assert isinstance(build_llm(g), GeminiLLM)
     assert isinstance(build_llm(Settings(provider="gemini", model="m", api_key="k")), GeminiLLM)
     assert isinstance(build_llm(Settings(provider="openai", model="m", api_key="k", base_url=None)), OpenAICompatibleLLM)
+
+
+def test_gemini_retry_em_timeout_e_fallback_thinking(monkeypatch):
+    import httpx
+
+    import emporio.llm as llm_mod
+
+    monkeypatch.setattr(llm_mod.time, "sleep", lambda s: None)
+    calls = []
+
+    def handler(req):
+        body = json.loads(req.content)
+        calls.append(body)
+        if len(calls) == 1:
+            raise httpx.ReadTimeout("lento")
+        if len(calls) == 2:
+            assert body["generationConfig"]["thinkingConfig"] == {"thinkingLevel": "low"}
+            return httpx.Response(400, json={"error": {"message": "thinking_level is not supported"}})
+        assert "thinkingConfig" not in body["generationConfig"]
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": "ok"}]}}]})
+
+    assert _gemini(handler).chat("s", [{"role": "user", "content": "oi"}], []).content == "ok"
+    assert len(calls) == 3

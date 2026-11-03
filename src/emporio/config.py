@@ -27,6 +27,8 @@ class Settings:
     api_key: str | None = field(default_factory=lambda: os.getenv("LLM_API_KEY") or None)
     base_url: str | None = field(default_factory=lambda: os.getenv("LLM_BASE_URL") or None)
     temperature: float = field(default_factory=lambda: float(os.getenv("LLM_TEMPERATURE", "0.2")))
+    timeout: float = field(default_factory=lambda: float(os.getenv("LLM_TIMEOUT", "180")))
+    retries: int = field(default_factory=lambda: int(os.getenv("LLM_RETRIES", "2")))
     max_tool_rounds: int = field(default_factory=lambda: int(os.getenv("AGENT_MAX_TOOL_ROUNDS", "6")))
     history_turns: int = field(default_factory=lambda: int(os.getenv("AGENT_HISTORY_TURNS", "12")))
     state_dir: Path = field(

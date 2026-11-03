@@ -9,6 +9,8 @@ tem adaptador próprio que converte para o formato de content blocks.
 from __future__ import annotations
 
 import json
+import os
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
@@ -98,7 +100,8 @@ class OpenAICompatibleLLM:
     def __init__(self, settings: Settings):
         from openai import OpenAI
 
-        self.client = OpenAI(api_key=settings.api_key or "not-needed", base_url=settings.base_url)
+        self.client = OpenAI(api_key=settings.api_key or "not-needed", base_url=settings.base_url,
+                             timeout=settings.timeout, max_retries=settings.retries)
         self.model, self.temperature = settings.model, settings.temperature
 
     def chat(self, system: str, messages: list[dict], tools: list[dict], force_text: bool = False) -> LLMResponse:
@@ -144,7 +147,10 @@ class GeminiLLM:
         self.url = f"{base.rstrip('/')}/models/{settings.model}:generateContent"
         self.headers = {"x-goog-api-key": settings.api_key or "", "content-type": "application/json"}
         self.temperature = settings.temperature
-        self.http = client or httpx.Client(timeout=60)
+        self.http = client or httpx.Client(timeout=settings.timeout)
+        self.retries = settings.retries
+        # Gemini 3 "pensa" antes de responder; para atendimento, raciocínio curto basta e corta a latência
+        self.thinking_level = os.getenv("GEMINI_THINKING_LEVEL", "low").strip() or None
 
     @staticmethod
     def _declaration(spec: dict) -> dict:
@@ -195,10 +201,9 @@ class GeminiLLM:
         if tools:
             body["tools"] = [{"functionDeclarations": [self._declaration(t) for t in tools]}]
             body["toolConfig"] = {"functionCallingConfig": {"mode": "NONE" if force_text else "AUTO"}}
-        r = self.http.post(self.url, headers=self.headers, json=body)
-        if r.status_code >= 400:
-            raise GeminiError(r.status_code, r.text)
-        data = r.json()
+        if self.thinking_level:
+            body["generationConfig"]["thinkingConfig"] = {"thinkingLevel": self.thinking_level}
+        data = self._post(body)
         cands = data.get("candidates") or []
         parts = (cands[0].get("content") or {}).get("parts", []) if cands else []
         text = "".join(p.get("text", "") for p in parts if not p.get("thought")) or None
@@ -211,6 +216,32 @@ class GeminiLLM:
                                          "output": meta.get("candidatesTokenCount", 0)})
         resp.raw_parts = [p for p in parts if not p.get("thought")] if calls else None
         return resp
+
+
+    def _post(self, body: dict) -> dict:
+        import httpx
+
+        last: Exception | None = None
+        for attempt in range(self.retries + 1):
+            try:
+                r = self.http.post(self.url, headers=self.headers, json=body)
+            except httpx.TimeoutException as e:
+                last = e
+            else:
+                if r.status_code < 400:
+                    return r.json()
+                err = GeminiError(r.status_code, r.text)
+                # modelo sem suporte a thinkingLevel: tenta de novo sem a configuração
+                if r.status_code == 400 and "thinking" in r.text.lower() and "thinkingConfig" in body["generationConfig"]:
+                    body["generationConfig"].pop("thinkingConfig")
+                    self.thinking_level = None
+                    continue
+                if r.status_code not in (429, 500, 502, 503, 504):
+                    raise err
+                last = err
+            if attempt < self.retries:
+                time.sleep(2 * (attempt + 1))
+        raise last  # type: ignore[misc]
 
 
 class GeminiError(Exception):
