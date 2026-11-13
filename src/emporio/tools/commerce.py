@@ -28,15 +28,17 @@ OVERSIZED_CATEGORIES = {"Baterias e Percussão", "Teclados e Pianos", "Cordas Or
 
 
 def to_number(value, field: str) -> float | None:
-    """Aceita 1000, "1000", "1.000,00", "R$ 1.000". Lança ValueError com mensagem útil."""
+    """Aceita 1000, "1000", "1.000,00", "R$ 1.000", "1000.50". Lança ValueError com mensagem útil."""
     if value is None or value == "":
         return None
     if isinstance(value, (int, float)):
         f = float(value)
     else:
-        t = str(value).replace("R$", "").strip()
-        if "," in t:
+        t = re.sub(r"\s+", "", str(value).replace("R$", ""))
+        if "," in t:  # padrão brasileiro: 1.234,56
             t = t.replace(".", "").replace(",", ".")
+        elif re.fullmatch(r"\d{1,3}(\.\d{3})+", t):  # "1.000" / "R$ 12.500" = milhar, não decimal
+            t = t.replace(".", "")
         try:
             f = float(t)
         except ValueError:

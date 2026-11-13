@@ -108,14 +108,20 @@ def _name_key(text: str) -> str:
     return re.sub(r"[^a-z0-9 ]", "", normalize(text))
 
 
+def _model_key(text: str) -> str:
+    """Como _name_key, mas junta código de modelo digitado com espaço:
+    'takamine gd 20' -> 'takamine gd20', 'yamaha c 40' -> 'yamaha c40'."""
+    return re.sub(r"\b([a-z]{1,4}) (\d{1,4}[a-z]?)\b", r"\1\2", _name_key(text))
+
+
 def rank_names(ctx: ToolContext, query: str) -> list[tuple[int, float, float]]:
     """[(product_id, token_set_ratio, WRatio)] em ordem decrescente.
     token_set_ratio = 100 quando a consulta está contida no nome ("takamine gd20");
     WRatio desempata e tolera erros de digitação."""
-    qk = _name_key(query)
+    qk = _model_key(query)
     rows = []
     for pid, name in ctx.store.products["name"].items():
-        nk = _name_key(name)
+        nk = _model_key(name)
         score = (fuzz.token_set_ratio(qk, nk) + fuzz.WRatio(qk, nk)) / 2
         rows.append((int(pid), round(score, 1), _coverage(qk, nk)))
     return sorted(rows, key=lambda r: (r[2], r[1]), reverse=True)
