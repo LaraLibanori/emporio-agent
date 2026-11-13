@@ -1,0 +1,47 @@
+name: evals
+
+# Roda os cenários end-to-end contra o LLM real e publica o relatório e as
+# conversas de exemplo. Manual (custa chamadas de API) e exige o secret
+# LLM_API_KEY em Settings → Secrets and variables → Actions.
+on:
+  workflow_dispatch:
+    inputs:
+      commit_results:
+        description: "Commitar evals/report.md e examples/*.md na branch"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    env:
+      LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'gemini' }}
+      LLM_MODEL: ${{ vars.LLM_MODEL || 'gemini-3.8-flash' }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      GEMINI_THINKING_LEVEL: low
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -e ".[dev,api]"
+      - name: Rodar evals e gerar exemplos
+        run: python evals/run_evals.py --examples || echo "::warning::alguma verificação falhou; ver evals/report.md"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: evals
+          path: |
+            evals/report.md
+            examples/*.md
+      - name: Commitar resultados
+        if: ${{ inputs.commit_results }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add evals/report.md examples/*.md
+          git diff --cached --quiet || git commit -m "chore(evals): relatório e conversas de exemplo geradas pelo LLM real"
+          git push

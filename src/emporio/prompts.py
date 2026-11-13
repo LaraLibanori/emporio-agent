@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from .hours import store_status
+
 DIAS = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"]
 
 SYSTEM_PROMPT = """\
@@ -87,14 +89,21 @@ Horário: seg–sex 09h–18h, sáb 09h–13h, domingos e feriados fechado. \
 Estes contatos prevalecem sobre qualquer outro número que apareça nos trechos do manual.
 
 # Fora do expediente
-Se a dúvida exigir a equipe humana e a loja estiver fechada (confira com `status_loja_agora`), \
-avise com naturalidade quando a equipe retorna.
+O contexto do sistema (no fim destas instruções) diz se a loja está aberta agora. Se estiver \
+fechada e o cliente precisar da equipe humana (chamado, reclamação, pedido para falar com \
+alguém), avise com naturalidade quando a equipe retorna. Dúvidas que você resolve sozinha \
+seguem normalmente, sem mencionar o horário. Para "estão abertos?" use `status_loja_agora`.
 """
 
 
 def turn_context(now: datetime) -> str:
-    """Contexto dinâmico anexado a cada chamada (não persiste no histórico)."""
+    """Contexto dinâmico anexado a cada chamada (não persiste no histórico).
+
+    O status da loja é calculado em código (horário + feriados) e vai em todo turno,
+    para o modelo cumprir a seção 7.1 ("fora do expediente, informar o horário de
+    retorno") sem precisar lembrar de chamar uma ferramenta.
+    """
     return (
         f"[contexto do sistema] Agora: {DIAS[now.weekday()]}, {now.strftime('%d/%m/%Y %H:%M')} "
-        "(horário de Campo Grande/MS). Use esta data para prazos."
+        f"(horário de Campo Grande/MS). Use esta data para prazos. Status: {store_status(now).summary()}."
     )

@@ -253,3 +253,39 @@ def test_gemini_retry_em_timeout_e_fallback_thinking(monkeypatch):
 
     assert _gemini(handler).chat("s", [{"role": "user", "content": "oi"}], []).content == "ok"
     assert len(calls) == 3
+
+
+# ---------------- regressões da revisão (nov/2026) ----------------
+
+def test_mensagens_simultaneas_da_mesma_sessao_sao_serializadas(tmp_path, ctx):
+    """WhatsApp: o cliente manda 2 mensagens seguidas; a 2ª resposta precisa ver a 1ª."""
+    import threading
+    import time
+
+    seen: list[list[str]] = []
+    first_started = threading.Event()
+
+    def fn(system, msgs):
+        seen.append([m["content"] for m in msgs if m["role"] == "user"])
+        first_started.set()
+        time.sleep(0.2)  # simula latência do modelo
+        return LLMResponse("ok")
+
+    agent, _ = make_agent(tmp_path, ctx, fn)
+    t1 = threading.Thread(target=agent.reply, args=("s", "oi"))
+    t1.start()
+    first_started.wait(2)
+    agent.reply("s", "quero um violão")
+    t1.join()
+    assert seen[1] == ["oi", "quero um violão"]
+
+
+def test_config_padrao_coerente_com_o_readme(monkeypatch):
+    for var in ("LLM_PROVIDER", "LLM_TEMPERATURE", "LLM_MODEL"):
+        monkeypatch.delenv(var, raising=False)
+    s = Settings()
+    assert s.provider == "gemini" and s.temperature == 1.0 and s.model
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    assert Settings().temperature == 0.2
+    monkeypatch.setenv("LLM_TEMPERATURE", "0.5")
+    assert Settings().temperature == 0.5

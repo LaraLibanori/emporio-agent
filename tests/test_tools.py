@@ -234,3 +234,38 @@ def test_entradas_numericas_em_texto(ctx):
     assert "erro" in run(ctx, "calcular_pagamento", valor=float("nan"))
     assert "erro" in run(ctx, "calcular_pagamento", valor=100, quantidade=-2)
     assert run(ctx, "estimar_frete", cidade="Campo Grande", produto="Kalani KAL-700T", quantidade=2)["valor"] == "grátis"
+
+
+# ---------------- regressões da revisão (nov/2026) ----------------
+
+def test_valores_com_separador_de_milhar(ctx):
+    from emporio.tools.commerce import to_number
+
+    assert to_number("1.000", "x") == 1000.0          # antes virava 1.0
+    assert to_number("R$ 12.500", "x") == 12500.0
+    assert to_number("R$ 1.234,56", "x") == 1234.56
+    assert to_number("1000.50", "x") == 1000.5       # ponto decimal continua valendo
+    assert run(ctx, "buscar_produtos", categoria="violão", preco_max="R$ 1.000")["total_encontrado"] == 12
+    assert run(ctx, "calcular_pagamento", valor="2.199")["credito"]["max_parcelas_sem_juros"] == 12
+
+
+def test_modelo_digitado_com_espaco(ctx):
+    assert run(ctx, "detalhes_produto", produto="takamine gd 20")["produto"]["id"] == 95
+    assert run(ctx, "detalhes_produto", produto="Yamaha C 40")["produto"]["id"] == 81
+    assert run(ctx, "detalhes_produto", produto="ohana ck 20")["produto"]["id"] == 121
+    assert run(ctx, "detalhes_produto", produto="Pearl Kit 2")["produto"]["id"] == 140
+    assert run(ctx, "detalhes_produto", produto="yamaha")["ambiguo"]  # marca sozinha segue ambígua
+
+
+def test_status_da_loja_no_contexto_de_cada_turno():
+    from datetime import datetime
+
+    from emporio.config import STORE_TZ
+    from emporio.prompts import turn_context
+
+    aberto = turn_context(datetime(2026, 3, 25, 10, 0, tzinfo=STORE_TZ))
+    assert "ABERTA" in aberto and "18:00" in aberto
+    finados = turn_context(datetime(2026, 11, 2, 15, 0, tzinfo=STORE_TZ))
+    assert "FECHADA" in finados and "Finados" in finados and "terça, 03/11 às 09:00" in finados
+    sabado = turn_context(datetime(2026, 3, 28, 14, 0, tzinfo=STORE_TZ))
+    assert "fora do horário" in sabado and "segunda, 30/03" in sabado

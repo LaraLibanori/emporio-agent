@@ -20,13 +20,26 @@ DATA_DIR = Path(os.getenv("AGENT_DATA_DIR", PROJECT_ROOT / "data"))
 STORE_TZ = ZoneInfo("America/Campo_Grande")
 
 
+def _env_provider() -> str:
+    return (os.getenv("LLM_PROVIDER") or "gemini").strip().lower()
+
+
+def _env_temperature() -> float:
+    """LLM_TEMPERATURE, se definida. Senão: 1.0 no Gemini 3 (recomendação do Google;
+    valores baixos podem causar repetição) e 0.2 nos demais (atendimento pede consistência)."""
+    raw = (os.getenv("LLM_TEMPERATURE") or "").strip()
+    if raw:
+        return float(raw)
+    return 1.0 if _env_provider() == "gemini" else 0.2
+
+
 @dataclass(frozen=True)
 class Settings:
-    provider: str = field(default_factory=lambda: os.getenv("LLM_PROVIDER", "openai").lower())
-    model: str = field(default_factory=lambda: os.getenv("LLM_MODEL", "gemini-3.8-flash"))
+    provider: str = field(default_factory=_env_provider)
+    model: str = field(default_factory=lambda: os.getenv("LLM_MODEL") or "gemini-3.8-flash")
     api_key: str | None = field(default_factory=lambda: os.getenv("LLM_API_KEY") or None)
     base_url: str | None = field(default_factory=lambda: os.getenv("LLM_BASE_URL") or None)
-    temperature: float = field(default_factory=lambda: float(os.getenv("LLM_TEMPERATURE", "0.2")))
+    temperature: float = field(default_factory=_env_temperature)
     timeout: float = field(default_factory=lambda: float(os.getenv("LLM_TIMEOUT", "180")))
     retries: int = field(default_factory=lambda: int(os.getenv("LLM_RETRIES", "2")))
     max_tool_rounds: int = field(default_factory=lambda: int(os.getenv("AGENT_MAX_TOOL_ROUNDS", "6")))

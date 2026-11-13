@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from dataclasses import dataclass, field
 
@@ -58,8 +59,22 @@ class Agent:
         self.history = store or ConversationStore(self.settings.state_dir / "conversations.db")
         self.tools = list(REGISTRY.values())
         self._ctx_factory = tool_context_factory or (lambda sid: ToolContext(session_id=sid, settings=self.settings))
+        self._locks: dict[str, threading.Lock] = {}
+        self._locks_guard = threading.Lock()
+
+    def _session_lock(self, session_id: str) -> threading.Lock:
+        with self._locks_guard:
+            return self._locks.setdefault(session_id, threading.Lock())
 
     def reply(self, session_id: str, user_message: str) -> AgentReply:
+        """Mensagens da MESMA sessão são processadas em ordem: no WhatsApp o cliente
+        costuma mandar 2-3 mensagens seguidas, e sem isso cada uma seria respondida sem
+        ver a outra (a API roda as requisições em paralelo). Sessões diferentes seguem
+        em paralelo."""
+        with self._session_lock(session_id):
+            return self._reply(session_id, user_message)
+
+    def _reply(self, session_id: str, user_message: str) -> AgentReply:
         ctx = self._ctx_factory(session_id)
         past = window(self.history.load(session_id), self.settings.history_turns)
         new_msgs: list[dict] = [{"role": "user", "content": user_message}]
