@@ -1,5 +1,7 @@
 # 🎸 Empório da Música — Agente de Atendimento
 
+[![tests](https://github.com/LaraLibanori/emporio-agent/actions/workflows/tests.yml/badge.svg)](https://github.com/LaraLibanori/emporio-agent/actions/workflows/tests.yml)
+
 Protótipo do agente de atendimento por mensagem de texto da **Empório da Música**, uma loja
 fictícia de instrumentos musicais em Campo Grande/MS. Faz parte do desafio técnico de AI Engineer da Artefact.
 
@@ -75,7 +77,7 @@ curl -X POST localhost:8000/chat -H 'content-type: application/json' \
 ### Testes e evals
 
 ```bash
-pytest                                   # 41 testes, sem rede e sem LLM (~2s)
+pytest                                   # 52 testes, sem rede e sem LLM (~2s)
 python evals/run_evals.py                # 10 cenários contra o LLM real -> evals/report.md
 python evals/run_evals.py --examples     # também (re)gera as conversas em examples/
 ```
@@ -93,7 +95,7 @@ flowchart LR
     U([Cliente]) -->|mensagem| I[CLI / API FastAPI]
     I --> A[Agent loop<br/>agent.py]
     A <-->|histórico| M[(SQLite<br/>conversations.db)]
-    A <-->|system prompt + tools| L{{LLM<br/>OpenAI-compat. / Anthropic}}
+    A <-->|system prompt + tools| L{{LLM<br/>Gemini nativo / OpenAI-compat. / Anthropic}}
     A -->|tool calls| T[Ferramentas determinísticas]
     T --> D[(CSVs tratados<br/>pandas)]
     T --> P[Manual de políticas<br/>BM25 por seção]
@@ -103,12 +105,13 @@ flowchart LR
 ```text
 src/emporio/
 ├── agent.py        # loop de function calling (≈80 linhas), fallback, trace
-├── llm.py          # adaptadores: OpenAI-compatível (Gemini/Groq/Ollama/OpenAI) e Anthropic
+├── llm.py          # adaptadores: Gemini (API nativa), OpenAI-compatível (OpenAI/Groq/Ollama) e Anthropic
 ├── prompts.py      # persona "Mel", regras de ancoragem, roteamento, escopo, LGPD
 ├── data.py         # carga + limpeza dos CSVs (disponibilidade, promoções, descrições)
 ├── policies.py     # parsing do PDF por seção + BM25 com expansão de consulta
 ├── memory.py       # histórico persistente + janela de contexto segura
 ├── config.py       # .env, fuso de Campo Grande, AGENT_NOW
+├── hours.py        # horário de funcionamento + feriados (aberta agora? quando reabre?)
 ├── cli.py / api.py # interfaces
 └── tools/
     ├── catalog.py  # buscar_produtos, detalhes_produto (fuzzy + alternativas)
@@ -196,7 +199,7 @@ O prompt é organizado em blocos com responsabilidades claras:
 4. **Privacidade (LGPD):** verificação antes de qualquer dado de pedido e nada de CPF ou cartão.
 5. **Escopo e segurança:** acessórios redirecionados (sem inventar lojas parceiras), assuntos fora da loja recusados com leveza, resistência a *prompt injection* e a descontos não autorizados.
 
-A **data e hora atuais** entram como contexto dinâmico a cada turno, sem ficar no histórico.
+A **data e hora atuais** e o **status da loja** (aberta/fechada, feriado, quando a equipe volta) entram como contexto dinâmico a cada turno, sem ficar no histórico. O status é calculado em código, então a regra da seção 7.1 ("fora do expediente, informar o horário de retorno") não depende de o modelo lembrar de chamar uma ferramenta.
 As **saídas das ferramentas** já vêm formatadas (R$ 1.234,56, datas dd/mm/aaaa) e trazem
 dicas de comportamento (`alerta`, `nota_interna`), o que reduz o trabalho do modelo.
 
@@ -219,7 +222,8 @@ resultado de ferramenta órfão (alguns provedores rejeitam isso). Chamados fica
 - O loop tem limite de rodadas de ferramenta (evita loops e custo descontrolado).
 - Verificação de pedido sem oráculo: "pedido não existe" e "e-mail errado" dão a mesma resposta. As falhas ficam em SQLite e têm dois limites numa janela de 1h: **3 por conversa e 5 por nº de pedido**. Assim, trocar de sessão não libera mais chutes, e um acerto não zera o contador. Ao atingir o limite, o cliente é encaminhado para a equipe.
 - Resposta vazia do modelo nunca é gravada no histórico. Na última rodada permitida, o modelo é forçado a responder em texto (`tool_choice=none`), então nenhuma ferramenta executa sem que o cliente veja o resultado.
-- As ferramentas aceitam números "humanos" (`"1.000,00"`, `8.0`, `"#8"`) e devolvem erros que o modelo consegue corrigir.
+- As ferramentas aceitam números "humanos" (`"1.000,00"`, `"R$ 1.000"`, `8.0`, `"#8"`) e devolvem erros que o modelo consegue corrigir. Nomes de modelo digitados com espaço ("takamine gd 20", "yamaha c 40") também são reconhecidos.
+- **Mensagens seguidas da mesma sessão são processadas em ordem** (lock por sessão). No WhatsApp é comum o cliente mandar 2–3 mensagens em sequência; sem isso, a API responderia cada uma em paralelo sem que uma visse a outra.
 
 ---
 
@@ -244,7 +248,7 @@ principais pontos:
 
 ## 5. Qualidade: testes e evals
 
-**Testes unitários (`pytest`, 41 testes, sem rede):**
+**Testes unitários (`pytest`, 52 testes, sem rede)**, rodando no **GitHub Actions** em Python 3.10 e 3.13 a cada push/PR:
 - *Ferramentas:* filtros e ordenação, preço promocional, acessório vs "7 cordas", fuzzy e ambiguidade, alternativas, PIX × promoção, parcelas por faixa, frete, verificação de identidade (formatos de telefone, não vazamento, bloqueio), devolução dentro e fora do prazo, garantia, feriados (incluindo Sexta-feira Santa), RAG por seção.
 - *Agente (com `ScriptedLLM`):* execução de ferramentas, persistência e isolamento de sessões, ferramenta inexistente, queda do provedor, limite de rodadas, janela de histórico, conversão para o formato Anthropic.
 
@@ -255,12 +259,14 @@ pedido sem verificação), **regex obrigatórias** (preço correto, protocolo) e
 exemplos do enunciado, privacidade, prompt injection, produto esgotado, categoria vazia e
 frete sem valor inventado. O relatório sai em `evals/report.md`.
 
+Os evals também rodam pelo workflow manual **`evals`** do GitHub Actions (usa o secret `LLM_API_KEY`), que publica o relatório e as conversas de exemplo.
+
 ---
 
 ## 6. Exemplos de conversa
 
 Em [`examples/`](examples/), geradas pelo próprio agente com
-`python evals/run_evals.py --examples` (conversas reais, com as ferramentas chamadas em
+`python evals/run_evals.py --examples` ou pelo workflow `evals` do GitHub Actions (conversas reais, com as ferramentas chamadas em
 cada turno):
 
 | Arquivo | Cenário | Não trivial? |
@@ -292,6 +298,7 @@ Seguindo a orientação do enunciado, assumi o seguinte e documentei cada ponto:
 **Limitações**
 - **O handoff humano é um arquivo** (`chamados.jsonl`). Não há integração real com helpdesk ou CRM.
 - **A verificação de identidade é simples** (nº do pedido + e-mail/telefone, com limite de tentativas). Em produção usaria OTP via WhatsApp.
+- **A ordem das mensagens é garantida por processo.** O lock por sessão vale para um processo da API; com várias réplicas, a fila por sessão precisaria de um broker (ex.: Redis ou SQS FIFO agrupando por remetente).
 - **O `session_id` da API é confiável por design.** O histórico de uma sessão pode conter dados de pedido já verificados, então em produção o id precisa vir de um canal autenticado (o número remetente informado pelo webhook do WhatsApp), nunca do cliente. A API também não tem autenticação própria.
 - **A instalação suportada é a editável** (`pip install -e .`): os CSVs e o PDF são lidos de `data/` no repositório (ou de `AGENT_DATA_DIR`).
 - **Frete fora de Campo Grande** não é cotado (exige CEP, peso e dimensões que o dataset não tem).
