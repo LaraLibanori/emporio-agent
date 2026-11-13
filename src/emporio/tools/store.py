@@ -4,59 +4,10 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import date, datetime, timedelta
 
+from ..hours import DIAS, HORARIO_PADRAO, holidays, store_status  # noqa: F401  (holidays: reexportado)
 from ..policies import get_policy_index
 from .base import ToolContext, tool
-
-WEEK_HOURS = {  # weekday() -> (abre, fecha)
-    0: ("09:00", "18:00"), 1: ("09:00", "18:00"), 2: ("09:00", "18:00"),
-    3: ("09:00", "18:00"), 4: ("09:00", "18:00"), 5: ("09:00", "13:00"),
-}
-DIAS = ["segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"]
-
-
-def _easter(y: int) -> date:  # algoritmo anônimo gregoriano
-    a, b, c = y % 19, y // 100, y % 100
-    d, e = b // 4, b % 4
-    f = (b + 8) // 25
-    g = (b - f + 1) // 3
-    h = (19 * a + b - d - g + 15) % 30
-    i, k = c // 4, c % 4
-    l = (32 + 2 * e + 2 * i - h - k) % 7
-    m = (a + 11 * h + 22 * l) // 451
-    month = (h + l - 7 * m + 114) // 31
-    day = (h + l - 7 * m + 114) % 31 + 1
-    return date(y, month, day)
-
-
-def holidays(y: int) -> dict[date, str]:
-    """Feriados nacionais + MS + Campo Grande (o manual diz 'Feriados: fechado')."""
-    fixed = {
-        (1, 1): "Confraternização Universal", (4, 21): "Tiradentes", (5, 1): "Dia do Trabalho",
-        (6, 13): "Santo Antônio (padroeiro de Campo Grande)", (8, 26): "Aniversário de Campo Grande",
-        (9, 7): "Independência", (10, 11): "Criação do Estado de MS", (10, 12): "Nossa Senhora Aparecida",
-        (11, 2): "Finados", (11, 15): "Proclamação da República", (11, 20): "Consciência Negra",
-        (12, 25): "Natal",
-    }
-    out = {date(y, m, d): n for (m, d), n in fixed.items()}
-    e = _easter(y)
-    out[e - timedelta(days=47)] = "Carnaval"
-    out[e - timedelta(days=2)] = "Sexta-feira Santa"
-    out[e + timedelta(days=60)] = "Corpus Christi"
-    return out
-
-
-def _next_opening(dt: datetime) -> datetime:
-    d = dt
-    for _ in range(14):
-        hrs = WEEK_HOURS.get(d.weekday())
-        if hrs and d.date() not in holidays(d.year):
-            opens = d.replace(hour=int(hrs[0][:2]), minute=0, second=0, microsecond=0)
-            if opens > dt:
-                return opens
-        d = (d + timedelta(days=1)).replace(hour=0, minute=0)
-    return d
 
 
 @tool(
@@ -68,25 +19,18 @@ o horário de retorno da equipe humana quando a loja estiver fechada.""",
 )
 def status_loja_agora(ctx: ToolContext) -> dict:
     dt = ctx.clock()
-    hol = holidays(dt.year).get(dt.date())
-    hrs = WEEK_HOURS.get(dt.weekday())
-    is_open = False
-    if hrs and not hol:
-        o = dt.replace(hour=int(hrs[0][:2]), minute=int(hrs[0][3:]), second=0)
-        c = dt.replace(hour=int(hrs[1][:2]), minute=int(hrs[1][3:]), second=0)
-        is_open = o <= dt < c
+    st = store_status(dt)
     out = {
         "agora": f"{DIAS[dt.weekday()]}, {dt.strftime('%d/%m/%Y %H:%M')} (horário de Campo Grande)",
-        "aberta_agora": is_open,
-        "horario_padrao": "segunda a sexta 09:00–18:00; sábado 09:00–13:00; domingos e feriados fechado",
+        "aberta_agora": st.is_open,
+        "horario_padrao": HORARIO_PADRAO,
     }
-    if hol:
-        out["feriado_hoje"] = hol
-    if is_open:
-        out["fecha_hoje_as"] = hrs[1]
+    if st.holiday:
+        out["feriado_hoje"] = st.holiday
+    if st.is_open:
+        out["fecha_hoje_as"] = st.closes_at
     else:
-        nxt = _next_opening(dt)
-        out["reabre"] = f"{DIAS[nxt.weekday()]}, {nxt.strftime('%d/%m')} às {nxt.strftime('%H:%M')}"
+        out["reabre"] = st.reopens_label
     out["obs"] = "em datas especiais (Black Friday, Aniversário, Natal) o horário pode ser estendido"
     return out
 
